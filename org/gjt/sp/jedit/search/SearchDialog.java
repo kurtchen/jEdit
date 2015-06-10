@@ -28,6 +28,7 @@ import javax.swing.*;
 
 import java.awt.*;
 import java.awt.event.*;
+import java.io.*;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.HashMap;
@@ -38,6 +39,7 @@ import org.gjt.sp.jedit.browser.VFSBrowser;
 import org.gjt.sp.jedit.gui.*;
 import org.gjt.sp.jedit.io.*;
 import org.gjt.sp.jedit.*;
+import org.gjt.sp.util.*;
 //}}}
 
 /**
@@ -346,7 +348,9 @@ public class SearchDialog extends EnhancedDialog
 
 	// buttons
 	private JButton findBtn, replaceBtn, replaceAndFindBtn, replaceAllBtn,
-		closeBtn;
+		closeBtn, add2FavBtn, removeFavBtn, listFavBtn;
+
+	private JPopupMenu favPop;
 
 	private boolean saving;
 	
@@ -397,14 +401,27 @@ public class SearchDialog extends EnhancedDialog
 	private void createFindLabelAndField(JPanel fieldPanel,
 		GridBagConstraints cons)
 	{
-		JLabel label = new JLabel(jEdit.getProperty("search.find"));
-		
-		label.setDisplayedMnemonic(jEdit.getProperty("search.find.mnemonic")
-			.charAt(0));
+		JPanel editPanel = new JPanel(new BorderLayout());
+
 		find = new HistoryTextArea("find");
 		find.setName("find");
 		find.setColumns(25);
 		find.setToolTipText(jEdit.getProperty("search.find.tooltip"));
+		JScrollPane editScrollPanel = new JScrollPane(find);
+		editPanel.add(BorderLayout.CENTER, editScrollPanel);
+
+		JPanel favBtnPanel = new JPanel(new GridLayout(3,1,0,5));
+		add2FavBtn = new JButton("A");
+		favBtnPanel.add(add2FavBtn);
+		listFavBtn = new JButton("L");
+		favBtnPanel.add(listFavBtn);
+		removeFavBtn = new JButton("D");
+		favBtnPanel.add(removeFavBtn);
+		editPanel.add(BorderLayout.EAST, favBtnPanel);
+
+		JLabel label = new JLabel(jEdit.getProperty("search.find"));
+		label.setDisplayedMnemonic(jEdit.getProperty("search.find.mnemonic")
+			.charAt(0));
 		label.setToolTipText(jEdit.getProperty("search.find.tooltip"));
 		label.setLabelFor(find);
 		label.setBorder(new EmptyBorder(12,0,2,0));
@@ -416,7 +433,7 @@ public class SearchDialog extends EnhancedDialog
 		cons.gridy++;
 		cons.weightx = 1.0;
 		cons.weighty = 1.0;
-		fieldPanel.add(new JScrollPane(find),cons);
+		fieldPanel.add(editPanel,cons);
 		cons.gridy++;
 	} //}}}
 
@@ -747,6 +764,10 @@ public class SearchDialog extends EnhancedDialog
 		box.add(grid);
 		box.add(Box.createGlue());
 
+		add2FavBtn.addActionListener(actionHandler);
+		listFavBtn.addActionListener(actionHandler);
+		removeFavBtn.addActionListener(actionHandler);
+
 		return box;
 	} //}}}
 
@@ -984,6 +1005,171 @@ public class SearchDialog extends EnhancedDialog
 			"search.keepDialog.toggle"));
 	} //}}}
 
+	//{{{ added for search favorites
+	private void save2Fav()
+	{
+		String settingsDirectory = settingsDirExists();
+		if (settingsDirectory != null)
+		{
+			if(find.getText().length() > 0)
+			{
+				File f = new File(MiscUtilities.constructPath(
+					settingsDirectory,"search_favorites.txt"));
+				BufferedWriter out = null;
+				try
+				{
+					out = new BufferedWriter(new OutputStreamWriter(new FileOutputStream(f, true)));
+					out.write(find.getText(), 0, find.getText().length());
+					out.newLine();
+					out.flush();
+				}
+				catch(IOException io)
+				{
+					setStatusBarMessage("failed save search favorites");
+					Log.log(Log.ERROR,SearchDialog.class,io);
+				}
+				finally
+				{
+					IOUtilities.closeQuietly((Closeable)out);
+				}
+			}
+		}
+	}
+
+	private void listFav()
+	{
+		String settingsDirectory = settingsDirExists();
+		if (settingsDirectory != null)
+		{
+			if(favPop != null && favPop.isVisible())
+			{
+				favPop.setVisible(false);
+				favPop = null;
+				return;
+			}
+
+			favPop = new JPopupMenu()
+			{
+				@Override
+				public void setVisible(boolean b)
+				{
+					if (!b)
+					{
+						favPop = null;
+					}
+					super.setVisible(b);
+				}
+			};
+			JMenuItem caption = new JMenuItem("Search Favorites");
+			favPop.add(caption);
+			favPop.addSeparator();
+
+			File f = new File(MiscUtilities.constructPath(
+				settingsDirectory,"search_favorites.txt"));
+			BufferedReader in = null;
+			String line = null;
+			try
+			{
+				in = new BufferedReader(new InputStreamReader(new FileInputStream(f)));
+				while ((line = in.readLine()) != null)
+				{
+					JMenuItem menuItem = new JMenuItem(line);
+					menuItem.addActionListener(new ActionHandler(line));
+					favPop.add(menuItem);
+				}
+			}
+			catch(IOException io)
+			{
+				setStatusBarMessage("failed read search favorites");
+				Log.log(Log.ERROR,SearchDialog.class,io);
+			}
+			finally
+			{
+				IOUtilities.closeQuietly((Closeable)in);
+			}
+
+			GUIUtilities.showPopupMenu(favPop,listFavBtn,0,listFavBtn.getHeight(),false);
+		}
+	}
+
+	private void removeFav()
+	{
+		String settingsDirectory = settingsDirExists();
+		if (settingsDirectory != null)
+		{
+			if(find.getText().length() > 0)
+			{
+				File f = new File(MiscUtilities.constructPath(
+					settingsDirectory,"search_favorites.txt"));
+				File tmpF = new File(MiscUtilities.constructPath(
+					settingsDirectory,"search_favorites.txt.tmp"));
+				BufferedReader in = null;
+				BufferedWriter out = null;
+				String line = null;
+				try
+				{
+					in = new BufferedReader(new InputStreamReader(new FileInputStream(f)));
+					out = new BufferedWriter(new OutputStreamWriter(new FileOutputStream(tmpF)));
+					while ((line = in.readLine()) != null)
+					{
+						if (find.getText().equals(line)) continue;
+						out.write(line, 0, line.length());
+						out.newLine();
+					}
+					out.flush();
+				}
+				catch(IOException io)
+				{
+					setStatusBarMessage("failed delete search favorites");
+					Log.log(Log.ERROR,SearchDialog.class,io);
+				}
+				finally
+				{
+					IOUtilities.closeQuietly((Closeable)in);
+					IOUtilities.closeQuietly((Closeable)out);
+				}
+				if (f.delete())
+				{
+					tmpF.renameTo(f);
+					tmpF.delete();
+				}
+				else
+				{
+					setStatusBarMessage("failed to delete original search favorites file");
+				}
+			}
+		}
+	}
+
+	private void setStatusBarMessage(String msg)
+	{
+		jEdit.getActiveView().getStatus().setMessageAndClear(msg);
+	}
+
+	private String settingsDirExists()
+	{
+		String settingsDirectory = jEdit.getSettingsDirectory();
+		if (settingsDirectory == null)
+		{
+			setStatusBarMessage("settings directory is null");
+		}
+		return settingsDirectory;
+	}
+
+	private class ActionHandler implements ActionListener
+	{
+		private String text;
+		public ActionHandler(String t)
+		{
+			text = t;
+		}
+
+		public void actionPerformed(ActionEvent evt)
+		{
+			find.setText(text);
+		}
+	}
+	//}}} added for search favorites
 	//}}}
 
 	//{{{ Inner classes
@@ -1128,6 +1314,18 @@ public class SearchDialog extends EnhancedDialog
 				}
 
 				setCursor(Cursor.getPredefinedCursor(Cursor.DEFAULT_CURSOR));
+			}
+			else if (source == add2FavBtn)
+			{
+				save2Fav();
+			}
+			else if (source == listFavBtn)
+			{
+				listFav();
+			}
+			else if (source == removeFavBtn)
+			{
+				removeFav();
 			}
 		}
 	} //}}}

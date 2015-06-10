@@ -1,0 +1,5 @@
+build
+lib
+.syntastic_javac_config
+myfilenametags
+tags
